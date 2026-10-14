@@ -43,6 +43,7 @@ label{font-size:13px;color:var(--tx2);margin-left:4px}
 .q{display:flex;align-items:center;gap:10px}
 .q button{width:44px;height:44px;border-radius:50%;border:1px solid var(--bd);background:var(--inp);color:var(--tx);font-size:22px;cursor:pointer}
 .q span{min-width:24px;text-align:center;font-weight:800;font-size:18px}
+.q input.qn{width:60px;text-align:center;font-weight:800;font-size:18px;padding:10px 4px;margin:0;border-radius:14px}
 .x{background:none;border:0;color:var(--tx2);cursor:pointer;padding:8px;min-width:44px;min-height:44px;display:grid;place-items:center}
 .fab{position:fixed;right:max(18px,calc(50% - 300px));bottom:calc(92px + env(safe-area-inset-bottom,0px));padding:0 24px;height:54px;font-weight:800;font-size:18px;color:var(--tx);cursor:pointer;border-radius:27px;z-index:4}
 .nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;gap:4px;padding:8px;border-radius:32px;z-index:5;background:var(--sheet)}
@@ -77,7 +78,8 @@ a.lk{color:#0090e8;font-weight:700;cursor:pointer}
 const $=s=>document.querySelector(s),A=$('#app');
 let db={users:[],sid:null,theme:'auto'};
 try{const r=localStorage.getItem('vt_db');if(r)db=JSON.parse(r)}catch(e){}
-const save=()=>{try{localStorage.setItem('vt_db',JSON.stringify(db))}catch(e){}};
+const FP=u=>{const s=JSON.stringify([u.nome,u.cognome,u.email,u.items,u.sales]);let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;return h+':'+s.length};
+const save=()=>{try{const u=db.sid&&db.users.find(x=>x.id===db.sid);if(u&&db.tk&&FB.apiKey){const f=FP(u);if(f!==u.fp){u.fp=f;u.updated=Date.now();sched()}}}catch(e){}try{localStorage.setItem('vt_db',JSON.stringify(db))}catch(e){}};
 const E=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const eur=n=>new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(n||0);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
@@ -97,7 +99,30 @@ function shell(act,c){
  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>GO[b.dataset.go]());
  $('#mn').onclick=()=>sheet(`<h2>Menu</h2>${[['home','Home'],['hist','Storico & statistiche'],['sett','Impostazioni']].map(([k,l])=>`<button class="opt" data-m="${k}">${l}</button>`).join('')}<button class="btn r" id="lo">Log Out</button>`,(m,c)=>{m.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{c();GO[b.dataset.m]()});$('#lo').onclick=()=>{c();logout()}});
 }
-function logout(){db.sid=null;save();auth()}
+async function logout(){try{await push()}catch(e){}db.sid=null;db.tk=null;save();auth()}
+
+/* CLOUD (Firebase REST) */
+const FB={apiKey:'',projectId:''};
+const CLOUD=()=>!!(FB.apiKey&&FB.projectId),IT='https://identitytoolkit.googleapis.com/v1/accounts:',FSU=()=>`https://firestore.googleapis.com/v1/projects/${FB.projectId}/databases/(default)/documents/users/`;
+const FE={EMAIL_EXISTS:'Email già registrata.',INVALID_LOGIN_CREDENTIALS:'Email o password errati.',INVALID_PASSWORD:'Email o password errati.',EMAIL_NOT_FOUND:'Email o password errati.',WEAK_PASSWORD:'Password di almeno 6 caratteri.',INVALID_EMAIL:'Email non valida.',TOO_MANY_ATTEMPTS_TRY_LATER:'Troppi tentativi, riprova tra poco.'};
+const fe=m=>FE[String(m).split(/[ :]/)[0]]||'Errore di connessione. Riprova.';
+async function jf(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||'ERR');return j}
+const setTk=j=>{db.tk={id:j.idToken,ref:j.refreshToken,exp:Date.now()+(+j.expiresIn)*1e3}};
+async function tok(){const t=db.tk;if(!t)throw 0;if(Date.now()<t.exp-6e4)return t.id;const r=await fetch('https://securetoken.googleapis.com/v1/token?key='+FB.apiKey,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(t.ref)}),j=await r.json();if(!r.ok)throw 0;db.tk={id:j.id_token,ref:j.refresh_token,exp:Date.now()+(+j.expires_in)*1e3};save();return db.tk.id}
+let pt;const sched=()=>{clearTimeout(pt);pt=setTimeout(push,1500)};
+async function push(){const u=U();if(!CLOUD()||!u||!db.tk)return;try{const body={fields:{data:{stringValue:JSON.stringify({nome:u.nome,cognome:u.cognome,email:u.email,items:u.items,sales:u.sales,updated:u.updated||Date.now()})}}},r=await fetch(FSU()+u.id+'?updateMask.fieldPaths=data',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await tok()},body:JSON.stringify(body)});if(!r.ok)throw 0}catch(e){clearTimeout(pt);pt=setTimeout(push,20000)}}
+async function pull(){const u=U();if(!CLOUD()||!u||!db.tk)return false;try{const r=await fetch(FSU()+u.id,{headers:{Authorization:'Bearer '+await tok()}});if(r.status===404){push();return false}if(!r.ok)return false;const j=await r.json(),d=JSON.parse(j.fields.data.stringValue);if((d.updated||0)>(u.updated||0)){Object.assign(u,d);u.fp=FP(u);save();return true}if((d.updated||0)<(u.updated||0))push()}catch(e){}return false}
+async function cloudAuth(reg,e,p,n,c,er){
+ if(reg){if(!n||!c)return er('Inserisci nome e cognome.');if(!/^\S+@\S+\.\S+$/.test(e))return er('Email non valida.');if(p.length<6)return er('Password di almeno 6 caratteri.')}
+ er('Un attimo…');
+ try{const j=await jf(IT+(reg?'signUp':'signInWithPassword')+'?key='+FB.apiKey,{email:e,password:p,returnSecureToken:true});
+  setTk(j);let u=db.users.find(x=>x.id===j.localId);
+  if(!u){u={id:j.localId,nome:n,cognome:c,email:e,items:[{id:'foto',name:'FOTO',price:0},{id:'video',name:'VIDEO',price:0}],sales:[],updated:reg?Date.now():0};if(!reg)u.fp=FP(u);db.users.push(u)}
+  else if(reg)Object.assign(u,{nome:n,cognome:c});
+  db.sid=u.id;save();if(!reg)await pull();
+  if(!u.nome)u.nome=e.split('@')[0];
+  save();home()
+ }catch(x){er(fe(x.message))}}
 
 /* AUTH */
 function auth(mode='login'){
@@ -111,6 +136,7 @@ function auth(mode='login'){
  $('#go').onclick=async()=>{
   const e=$('#e').value.trim().toLowerCase(),p=$('#p').value,er=m=>$('#er').textContent=m;
   if(!e||!p)return er('Compila tutti i campi.');
+  if(CLOUD())return cloudAuth(reg,e,p,reg?$('#n').value.trim():'',reg?$('#c').value.trim():'',er);
   if(reg){const n=$('#n').value.trim(),c=$('#c').value.trim();
    if(!n||!c)return er('Inserisci nome e cognome.');
    if(!/^\S+@\S+\.\S+$/.test(e))return er('Email non valida.');
@@ -143,16 +169,17 @@ function create(){
  <div class="glass card"><b>Prezzo unitario</b>${u.items.map(i=>`<div style="margin-top:14px"><div class="row"><span style="font-weight:600">${E(i.name)}</span><input class="pr" inputmode="decimal" data-id="${i.id}" value="${i.price||''}" placeholder="0,00 €"></div>
  ${CH[i.id]?`<div class="chips">${CH[i.id].map(v=>`<button class="chip ${+i.price===v?'on':''}" data-set="${i.id}:${v}">${v} €</button>`).join('')}</div>`:''}</div>`).join('')}</div>
  <div class="glass card">${u.items.map(i=>`<div class="row" style="padding:8px 0"><div><b>${E(i.name)}</b><div class="sub" id="c_${i.id}">${q[i.id]||0} × ${eur(i.price)}</div></div>
- <div class="q">${CH[i.id]?'':`<button class="x" data-rm="${i.id}" style="border:0;background:none;color:var(--red)">${IC(P.bin,20)}</button>`}<button data-m="${i.id}">−</button><span id="n_${i.id}">${q[i.id]||0}</span><button data-p="${i.id}">+</button></div></div>`).join('')}
+ <div class="q">${CH[i.id]?'':`<button class="x" data-rm="${i.id}" style="border:0;background:none;color:var(--red)">${IC(P.bin,20)}</button>`}<button data-m="${i.id}">−</button><input class="qn" id="n_${i.id}" inputmode="numeric" pattern="[0-9]*" value="${q[i.id]||0}" aria-label="Quantità ${E(i.name)}"><button data-p="${i.id}">+</button></div></div>`).join('')}
  ${nw?`<div class="row" style="margin-top:8px"><input id="nv" placeholder="Nome voce (es. DRONE)" maxlength="24"><button class="chip on" id="ok">OK</button></div>`:''}
  <button class="btn g" id="add">+ Aggiungi Voce</button></div><button class="fab glass" id="tt">Totale ${eur(total())}</button>`);
- const rf=i=>{$('#n_'+i.id).textContent=q[i.id]||0;$('#c_'+i.id).textContent=`${q[i.id]||0} × ${eur(i.price)}`;$('#tt').textContent='Totale '+eur(total())};
+ const rf=(i,k)=>{if(!k)$('#n_'+i.id).value=q[i.id]||0;$('#c_'+i.id).textContent=`${q[i.id]||0} × ${eur(i.price)}`;$('#tt').textContent='Totale '+eur(total())};
  const it=id=>u.items.find(i=>i.id===id);
  document.querySelectorAll('.pr').forEach(x=>x.oninput=()=>{const i=it(x.dataset.id);i.price=parseFloat(x.value.replace(',','.'))||0;save();rf(i);document.querySelectorAll(`[data-set^="${i.id}:"]`).forEach(c=>c.classList.toggle('on',+c.dataset.set.split(':')[1]===i.price))});
  document.querySelectorAll('[data-set]').forEach(b=>b.onclick=()=>{const[id,v]=b.dataset.set.split(':');it(id).price=+v;save();create()});
  document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{q[b.dataset.p]=(q[b.dataset.p]||0)+1;rf(it(b.dataset.p))});
  document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>{q[b.dataset.m]=Math.max(0,(q[b.dataset.m]||0)-1);rf(it(b.dataset.m))});
  document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>ask(`Eliminare la voce "${E(it(b.dataset.rm).name)}"?`,()=>{u.items=u.items.filter(i=>i.id!==b.dataset.rm);delete q[b.dataset.rm];save();create()}));
+ document.querySelectorAll('.qn').forEach(x=>{const id=x.id.slice(2);x.onfocus=()=>x.select();x.oninput=()=>{x.value=x.value.replace(/\D/g,'').slice(0,4);q[id]=+x.value||0;rf(it(id),1)};x.onblur=()=>{x.value=q[id]||0}});
  $('#add').onclick=()=>{nw=true;create();$('#nv').focus()};
  if($('#ok'))$('#ok').onclick=()=>{const n=$('#nv').value.trim().toUpperCase();nw=false;if(n)u.items.push({id:uid(),name:n,price:0});save();create()};
  $('#tt').onclick=()=>{
@@ -273,7 +300,7 @@ function sett(){
  <label>Email</label><input id="e" type="email" value="${E(u.email)}"><label>Nuova password (opzionale)</label><input id="p" type="password" placeholder="Lascia vuoto per non cambiare">
  <div class="err" id="er"></div><button class="btn" id="sp">Salva profilo</button></div>
  <div class="glass card row"><div><b>Tema scuro</b><div class="sub">Chiaro / Scuro</div></div><label class="sw"><input type="checkbox" id="th" ${isDark()?'checked':''}><i></i></label></div>
- <div class="glass card"><b>Dati</b><button class="btn g" id="ex">Esporta storico (.zip)</button><button class="btn g" id="im">Importa da .zip</button><input type="file" id="fi" accept=".zip" hidden></div>
+ <div class="glass card"><b>Dati</b><div class="sub" style="margin:4px 0">☁️ ${CLOUD()?'Sincronizzazione cloud attiva':'Cloud non configurato: dati solo su questo dispositivo'}</div>${CLOUD()?'<button class="btn g" id="sy">Sincronizza ora</button>':''}<button class="btn g" id="ex">Esporta storico (.zip)</button><button class="btn g" id="im">Importa da .zip</button><input type="file" id="fi" accept=".zip" hidden></div>
  <div class="glass card"><b>Excel</b><div class="sub">Scontrino di tutte le vendite, con totali e grafici</div><select id="xp"><option value="all">Tutto lo storico</option><option value="week">Questa settimana</option><option value="month">Questo mese</option><option value="year">Quest'anno</option><option value="custom">Periodo personalizzato…</option></select><div id="xc" style="display:none"><label>Dal</label><input type="date" id="xa"><label>Al</label><input type="date" id="xb"></div><button class="btn g" id="xx">Crea file Excel (.xlsx)</button></div>
  <button class="btn r" id="lo">Log Out</button>`);
  $('#th').onchange=e=>{db.theme=e.target.checked?'dark':'light';save();theme()};
@@ -281,8 +308,10 @@ function sett(){
   if(!n||!c||!/^\S+@\S+\.\S+$/.test(e))return $('#er').textContent='Controlla nome, cognome ed email.';
   if(db.users.some(x=>x.email===e&&x.id!==u.id))return $('#er').textContent='Email già in uso.';
   if(p&&p.length<6)return $('#er').textContent='Password di almeno 6 caratteri.';
-  Object.assign(u,{nome:n,cognome:c,email:e});if(p)u.pw=await H(p);save();toast('Profilo aggiornato ✓');$('#er').textContent='';$('#p').value=''};
+  if(CLOUD()){if(e!==u.email||p){try{const j=await jf(IT+'update?key='+FB.apiKey,{idToken:await tok(),email:e,...(p?{password:p}:{}),returnSecureToken:true});setTk(j)}catch(x){return $('#er').textContent=/LOGIN_REQUIRED/.test(x.message)?'Per cambiare email o password esci e accedi di nuovo.':fe(x.message)}}}else if(p)u.pw=await H(p);
+  Object.assign(u,{nome:n,cognome:c,email:e});save();toast('Profilo aggiornato ✓');$('#er').textContent='';$('#p').value=''};
  $('#lo').onclick=logout;
+ if($('#sy'))$('#sy').onclick=async()=>{const ch=await pull();await push();toast('Sincronizzato ✓');if(ch)sett()};
  $('#xp').onchange=e=>{$('#xc').style.display=e.target.value==='custom'?'block':'none'};
  $('#xx').onclick=()=>xlsxExport($('#xp').value,$('#xa').value,$('#xb').value);
  $('#ex').onclick=async()=>{
@@ -302,7 +331,28 @@ function sett(){
   e.target.value=''};
 }
 
-theme();U()?home():auth();
+const rr=ch=>{if(ch)$('#b1')?home():$('#f')?hist():0};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&U())pull().then(rr)});
+theme();U()?(home(),pull().then(rr)):auth();
+</script>
+<script type="module">  
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyAiqD_f2Izsy__6Ej1q4T5rBSurnlOSOyU",
+  authDomain: "lensly-f4d7f.firebaseapp.com",
+  projectId: "lensly-f4d7f",
+  storageBucket: "lensly-f4d7f.firebasestorage.app",
+  messagingSenderId: "401860649624",
+  appId: "1:401860649624:web:ce3bed790f0f19432266ed"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 </script>
 </body>
 </html>
